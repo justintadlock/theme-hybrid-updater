@@ -58,7 +58,7 @@ final class TH_Updater {
 			'sslverify'          => true,
 			'requires'           => '3.5',
 			'tested'             => '3.7',
-			'readme'             => 'readme.txt',
+			'readme'             => 'readme.md',
 			'access_token'       => ''
 		);
 
