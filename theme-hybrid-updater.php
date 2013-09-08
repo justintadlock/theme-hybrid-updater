@@ -1,9 +1,9 @@
 <?php
 /*
  * Plugin Name: ThemeHybrid.com Updater
- * Plugin URI: http://themehybrid.com
+ * Plugin URI: http://themehybrid.com/plugins/theme-hybrid-updater
  * Description: Note: This plugin is not ready for live use yet. Theme updater for all themes on ThemeHybrid.com.
- * Version: 0.1.0
+ * Version: 0.1.0-alpha-2
  * Author: Justin Tadlock
  * Author URI: http://justintadlock.com
  */
@@ -17,8 +17,41 @@ final class TH_Updater {
 	 * @access public
 	 * @var    string
 	 */
-	//public $api_url = 'http://themehybrid.com/api';
-	public $api_url = 'http://localhost/api';
+	public $api_url = 'http://themehybrid.com/api';
+	//public $api_url = 'http://localhost/api';
+
+	/**
+	 * Supported themes.  Kind of hacky, but it speeds things up.  As long as users keep this 
+	 * plugin updated, this is fine for now.
+	 *
+	 * @since  0.1.0
+	 * @access public
+	 * @var    string
+	 */
+	public $allowed_themes = array(
+		'justin-tadlock', // test
+		'ascetica',
+		'adroa',
+		'cakifo',
+		'celebrate',
+		'chun',
+		'hybrid',
+		'live-wire',
+		'my-life',
+		'news',
+		'path',
+		'picturesque',
+		'prototype',
+		'retro-fitted',
+		'satu',
+		'shell',
+		'socially-awkward',
+		'spine',
+		'sukelius-magazine',
+		'trending',
+		'unique',
+		'uridimmu',
+	);
 
 	/**
 	 * Update data stored so that we're not sending a request multiple times on a page load.
@@ -42,31 +75,48 @@ final class TH_Updater {
 		if ( !is_admin() )
 			return;
 
-		/**
-		 * For now, we're going to update this plugin from GitHub.  In the future, I might offer 
-		 * plugin updates from ThemeHybrid.com.  One step at a time, okay?
-		 */
-		require_once( trailingslashit( plugin_dir_path( __FILE__ ) ) . 'github-plugin-updater.php' );
+		add_action( 'admin_menu', array( $this, 'setup' ) );
+
+		/* Development. */
+		//add_filter( 'site_transient_update_themes', array( $this, 'transient_update_themes' ) );
+		//add_filter( 'transient_update_themes',      array( $this, 'transient_update_themes' ) );
+
+		/* Production. */
+		add_filter( 'pre_set_site_transient_update_themes', array( $this, 'transient_update_themes' ) );
+		add_filter( 'pre_set_transient_update_themes',      array( $this, 'transient_update_themes' ) );
+	}
+
+	public function setup() {
+
+		/* ===================================================== */
+
+		/* Load the updater used to actually update this plugin. */
+		require_once( trailingslashit( plugin_dir_path( __FILE__ ) ) . 'class-th-plugin-updater.php' );
+
+		$plugin_data = get_plugin_data( __FILE__, false );
 
 		$config = array(
+			'api_url'            => trailingslashit( $this->api_url ) . 'plugin_update',
+			'zip_url'            => 'http://justintadlock.com/downloads/theme-hybrid-updater.zip',
 			'slug'               => plugin_basename( __FILE__ ),
-			'proper_folder_name' => 'theme_hybrid_updater',
-			'api_url'            => 'https://api.github.com/repos/justintadlock/theme-hybrid-updater',
-			'raw_url'            => 'https://raw.github.com/justintadlock/theme-hybrid-updater/master',
-			'github_url'         => 'https://github.com/justintadlock/theme-hybrid-updater',
-			'zip_url'            => 'https://github.com/justintadlock/theme-hybrid-updater/zipball/master',
-			'sslverify'          => true,
-			'requires'           => '3.5',
-			'tested'             => '3.7',
-			'readme'             => 'readme.md',
-			'access_token'       => ''
+			'folder_name'        => dirname( plugin_basename( __FILE__ ) ),
+			'plugin_name'        => $plugin_data['Name'],
+			'author'             => $plugin_data['Author'],
+			'homepage'           => $plugin_data['PluginURI'],
+			'version'            => $plugin_data['Version'],
+		//	'url'                => $plugin_data['PluginURI'],
+			'requires'           => '',
+			'tested'             => '',
+			'last_updated'       => '',
+			'downloaded'         => 0,
+		//	'readme'             => 'readme.md',
+			'description'        => $plugin_data['Description'],
+			'changelog'          => '',
 		);
 
-		new WP_GitHub_Updater( $config );
-		/* =========================== */
+		new TH_Plugin_Updater( $config );
 
-		add_filter( 'site_transient_update_themes', array( $this, 'transient_update_themes' ) );
-		add_filter( 'transient_update_themes',      array( $this, 'transient_update_themes' ) );
+		/* ===================================================== */
 	}
 
 	/**
@@ -78,24 +128,23 @@ final class TH_Updater {
 	 * @param  object  $value
 	 * @return object
 	 */
-	function transient_update_themes( $value ) {
+	function transient_update_themes( $transient ) {
 
-		/* Make sure $value is an object.  Otherwise, just return it. */
-		if ( !is_object( $value ) )
-			return $value;
+		if ( empty( $transient->checked ) )
+			return $transient;
 
 		/* Check for theme updates. */
-		$update = $this->theme_update_check( $value->checked );
+		$update = $this->theme_update_check( $transient->checked );
 
 		/* If an updates were found, add them to the transient value. */
 		if ( !empty( $update ) ) {
 
 			foreach ( $update as $theme_slug => $theme_update_data ) {
-				$value->response[ $theme_slug ] = $theme_update_data;
+				$transient->response[ $theme_slug ] = $theme_update_data;
 			}
 		}
 
-		return $value;
+		return $transient;
 	}
 
 	/**
@@ -110,14 +159,20 @@ final class TH_Updater {
 	public function theme_update_check( $themes ) {
 		global $wp_version;
 
+		$this->theme_update = get_site_transient( 'th_updater_all_themes' );
+
 		/* If there is no update at this point, check for one. */
-		if ( is_null( $this->theme_update ) ) {
+		if ( empty( $this->theme_update ) ) {
 
 			/* Set up the theme data we want to send to the host site. */
 			$data_themes = array();
 
-			foreach ( $themes as $slug => $version )
-				$data_themes[] = $slug;
+			foreach ( $themes as $slug => $version ) {
+
+				/* Make sure this is a Theme Hybrid theme. */
+				if ( in_array( $slug, $this->allowed_themes ) )
+					$data_themes[] = $slug;
+			}
 
 			/* Set up the request. */
 			$request = array(
@@ -135,10 +190,15 @@ final class TH_Updater {
 			/* See if we can get a response from the host site. */
 			$response = wp_remote_post( trailingslashit( $this->api_url ) . 'theme_update_all', $data );
 
+			if ( is_wp_error( $response ) )
+				return false;
+
 			$this->theme_update = wp_remote_retrieve_body( $response );
 
-			if ( empty( $this->theme_update ) || is_wp_error( $this->theme_update ) )
-				return false;
+			$this->theme_update = maybe_unserialize( $this->theme_update );
+
+			/* Set the transient. */
+			set_site_transient( 'th_updater_all_themes', $this->theme_update, DAY_IN_SECONDS );
 		}
 
 		/* Unserialize the data returned from the host site. */
@@ -153,12 +213,9 @@ final class TH_Updater {
 				if ( !empty( $updated_arr['new_version'] ) && !empty( $updated_arr['package'] ) && !empty( $updated_arr['url'] ) ) {
 
 					if ( version_compare( $themes[ $updated_theme ], $updated_arr['new_version'], '<' ) ) {
-
 						$return_data[ $updated_theme ] = $updated_arr;
-
 					}
 				}
-
 			}
 
 			return $return_data;
